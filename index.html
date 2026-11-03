@@ -6,7 +6,8 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-fullscreen">
 <meta name="robots" content="noindex">
-<title>3D 收藏卡牌動畫</title>
+<title>百變隆政策卡牌</title>
+<meta name="apple-mobile-web-app-title" content="百變隆政策卡牌">
 <style>
 html,body{margin:0;height:100%;background:#000;overflow:hidden;overscroll-behavior:none;touch-action:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none}
 body{position:fixed;inset:0;width:100%}
@@ -16,27 +17,26 @@ canvas{display:block;background:#000;touch-action:none;-webkit-user-select:none;
 #hint{position:fixed;left:0;right:0;bottom:7%;text-align:center;color:rgba(255,255,255,.92);font:500 17px/1.4 system-ui,-apple-system,"PingFang TC","Noto Sans TC",sans-serif;letter-spacing:.25em;text-shadow:0 0 10px rgba(0,0,0,.75);opacity:0;transition:opacity .6s;pointer-events:none}
 #hint span{display:inline-block;animation:pulse 1.8s ease-in-out infinite}
 @keyframes pulse{0%,100%{transform:scale(1);opacity:.6}50%{transform:scale(1.06);opacity:1}}
+#redo{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 5%);transform:translateX(-50%);padding:14px 26px;color:#fff;font:600 17px/1.2 system-ui,-apple-system,"PingFang TC","Noto Sans TC",sans-serif;letter-spacing:.2em;white-space:nowrap;border:1px solid rgba(255,255,255,.55);border-radius:999px;background:rgba(0,0,0,.35);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);text-shadow:0 0 10px rgba(0,0,0,.7);opacity:0;pointer-events:none;transition:opacity .6s;touch-action:manipulation;cursor:pointer}
+#redo.on{opacity:1;pointer-events:auto}
 </style></head><body>
 <div id="hint"><span>點一下卡牌</span></div>
+<div id="redo">點擊《重新抽選》</div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>window.THREE||document.write('<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"><\/script>')</script>
 <script>
 const FRONTS=["assets/f00.webp","assets/f01.webp","assets/f02.webp","assets/f03.webp","assets/f04.webp","assets/f05.webp","assets/f06.webp","assets/f07.webp","assets/f08.webp","assets/f09.webp","assets/f10.webp"];
-const FRONT=(function(){
- const n=FRONTS.length;let i=-1;
+// 機率(%)：0=SSR 5；6、7、10=SR 各約8.33（合計25）；其餘7張普通卡各10（合計70）
+const PW=[5,10,10,10,10,10,25/3,25/3,10,10,25/3];
+const pickW=()=>{const n=FRONTS.length,u=new Uint32Array(1);crypto.getRandomValues(u);let x=u[0]/4294967296*100;for(let k=0;k<n;k++){x-=PW[k];if(x<0)return k;}return n-1;};
+function drawNext(prev){let i=pickW();while(FRONTS.length>1&&i===prev)i=pickW();try{localStorage.setItem('lastCard',String(i));}catch(e){}return i;}
+let curIdx=(function(){
  const h=location.hash.match(/^#(\d+)$/);
- if(h&&+h[1]<n)i=+h[1];
- else{
-  let last=-1;try{last=parseInt(localStorage.getItem('lastCard'),10);}catch(e){}
-  // 機率(%)：0=SSR 5；6、7、10=SR 各約8.33（合計25）；其餘7張普通卡各10（合計70）
-  const W=[5,10,10,10,10,10,25/3,25/3,10,10,25/3];
-  const pickW=()=>{const u=new Uint32Array(1);crypto.getRandomValues(u);let x=u[0]/4294967296*100;for(let k=0;k<n;k++){x-=W[k];if(x<0)return k;}return n-1;};
-  i=pickW();
-  if(n>1)while(i===last)i=pickW();
- }
- try{localStorage.setItem('lastCard',String(i));}catch(e){}
- return FRONTS[i];
+ if(h&&+h[1]<FRONTS.length){try{localStorage.setItem('lastCard',h[1]);}catch(e){}return +h[1];}
+ let last=-1;try{last=parseInt(localStorage.getItem('lastCard'),10);}catch(e){}
+ return drawNext(last);
 })();
+const FRONT=FRONTS[curIdx];
 const BACK="assets/back.webp";
 const CLOUD="assets/cloud.jpg";
 const STARS="assets/stars.jpg";
@@ -64,10 +64,11 @@ const card=new THREE.Group();scene.add(card);
 const eg=new THREE.ExtrudeGeometry(shape,{depth:T,bevelEnabled:false,curveSegments:24});
 eg.translate(0,0,-T/2);
 card.add(new THREE.Mesh(eg,new THREE.MeshStandardMaterial({color:0xdcdcdc,roughness:0.5,metalness:0.1})));
+let frontMat;
 function face(src,back){
  const g=new THREE.ShapeGeometry(shape,24),p=g.attributes.position,uv=g.attributes.uv;
  for(let i=0;i<p.count;i++)uv.setXY(i,p.getX(i)/CW+0.5,p.getY(i)/CH+0.5);
- const m=new THREE.MeshBasicMaterial();
+ const m=new THREE.MeshBasicMaterial();if(!back)frontMat=m;
  const mesh=new THREE.Mesh(g,m);
  mesh.position.z=(back?-1:1)*(T/2+0.0004);
  if(back)mesh.rotation.y=Math.PI;
@@ -131,8 +132,7 @@ function updateBG(T){
 const Y0=1.95,ease=x=>1-Math.pow(1-x,3);
 // SSR 專屬：環繞卡牌的金色光粒子（純粒子，無線條）
 const holy=(function(){
- if(FRONT!==FRONTS[0])return null;
- const N=2000,pos=new Float32Array(N*3),siz=new Float32Array(N),alp=new Float32Array(N),vel=new Float32Array(N*3),age=new Float32Array(N).fill(99),life=new Float32Array(N),ph=new Float32Array(N);
+  const N=2000,pos=new Float32Array(N*3),siz=new Float32Array(N),alp=new Float32Array(N),vel=new Float32Array(N*3),age=new Float32Array(N).fill(99),life=new Float32Array(N),ph=new Float32Array(N);
  const g=new THREE.BufferGeometry();
  g.setAttribute('position',new THREE.BufferAttribute(pos,3));
  g.setAttribute('aSize',new THREE.BufferAttribute(siz,1));
@@ -146,7 +146,7 @@ const holy=(function(){
   vec3 col=mix(vec3(1.0,0.74,0.26),vec3(1.0,0.97,0.8),core*0.8);
   gl_FragColor=vec4(col,(soft*0.8+core*0.7)*vA);}`});
  const pts=new THREE.Points(g,pm);pts.frustumCulled=false;pts.renderOrder=3;scene.add(pts);
- let acc=0,idx=0;
+ let acc=0,idx=0,on=false;
  function spawn(cy,wf,burst){
   const i=idx;idx=(idx+1)%N;
   const hw=CW/2,hh=CH/2,a=Math.random()*6.2832,c=Math.cos(a),s=Math.sin(a);
@@ -160,10 +160,11 @@ const holy=(function(){
   age[i]=0;life[i]=glow?2.2+Math.random()*1.8:1.6+Math.random()*1.8;siz[i]=glow?0.16+Math.random()*0.14:0.035+Math.pow(Math.random(),2)*0.09;ph[i]=Math.random()*6.28;
  }
  return{
-  burst(cy){for(let k=0;k<300;k++)spawn(cy,1,true);},
+  set(v){on=v;acc=0;},
+  burst(cy){if(!on)return;for(let k=0;k<300;k++)spawn(cy,1,true);},
   update(cy,ry,dt,falling){
    const wf=Math.max(0.12,Math.abs(Math.cos(ry)));
-   acc+=dt*(falling?650:240);
+   if(on)acc+=dt*(falling?650:240);
    while(acc>=1){spawn(cy,wf,false);acc--;}
    for(let i=0;i<N;i++){
     if(age[i]<life[i]){age[i]+=dt;pos[i*3]+=vel[i*3]*dt;pos[i*3+1]+=vel[i*3+1]*dt;
@@ -187,20 +188,114 @@ glint.position.z=T/2+0.0009;glint.renderOrder=5;card.add(glint);
 
 let t0=null;
 let live=false,drag=false,rotY=0,vel=0,lastX=0,lastT=0,lastNow=0;
+// ===== 音效（以程式合成，不需音檔）=====
+const AC=window.AudioContext||window.webkitAudioContext;
+let ac=null,master=null,fx=null,noiseBuf=null,soundOn=true;
+try{soundOn=localStorage.getItem('snd')!=='0';}catch(e){}
+let keepAudio=null;
+function silentWav(){const sr=8000,n=800,b=new Uint8Array(44+n),dv=new DataView(b.buffer),w=(o,s)=>{for(let i=0;i<s.length;i++)b[o+i]=s.charCodeAt(i);};
+ w(0,'RIFF');dv.setUint32(4,36+n,true);w(8,'WAVE');w(12,'fmt ');dv.setUint32(16,16,true);dv.setUint16(20,1,true);dv.setUint16(22,1,true);dv.setUint32(24,sr,true);dv.setUint32(28,sr,true);dv.setUint16(32,1,true);dv.setUint16(34,8,true);w(36,'data');dv.setUint32(40,n,true);b.fill(128,44);
+ return URL.createObjectURL(new Blob([b],{type:'audio/wav'}));}
+function unlock(){
+ try{if(navigator.audioSession)navigator.audioSession.type='playback';}catch(e){}
+ try{if(!keepAudio){keepAudio=new Audio(silentWav());keepAudio.loop=true;keepAudio.setAttribute('playsinline','');keepAudio.volume=0.01;const pp=keepAudio.play();if(pp&&pp.catch)pp.catch(()=>{});}}catch(e){}
+ if(!AC)return;
+ try{
+  if(!ac){ac=new AC();master=ac.createGain();master.gain.value=0.75;
+   const comp=ac.createDynamicsCompressor();comp.threshold.value=-18;comp.ratio.value=4;master.connect(comp);comp.connect(ac.destination);
+   fx=ac.createGain();const dly=ac.createDelay(1),fb=ac.createGain(),flp=ac.createBiquadFilter();
+   dly.delayTime.value=0.19;fb.gain.value=0.33;flp.type='lowpass';flp.frequency.value=2400;
+   fx.connect(master);fx.connect(dly);dly.connect(flp);flp.connect(fb);fb.connect(dly);flp.connect(master);
+   noiseBuf=ac.createBuffer(1,ac.sampleRate*2,ac.sampleRate);const d=noiseBuf.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1;}
+  if(ac.state==='suspended')ac.resume();
+ }catch(e){}
+}
+addEventListener('pointerdown',unlock,true);
+addEventListener('touchend',unlock,true);
+const sndLive=()=>ac&&ac.state==='running'&&soundOn;
+function noiseSrc(t,dur){const s=ac.createBufferSource();s.buffer=noiseBuf;s.loop=true;s.start(t);s.stop(t+dur);return s;}
+function sndFall(){
+ if(!sndLive())return;const t=ac.currentTime+0.02;
+ const n=noiseSrc(t,1.6),f=ac.createBiquadFilter(),g=ac.createGain();
+ f.type='bandpass';f.Q.value=1.1;f.frequency.setValueAtTime(2600,t);f.frequency.exponentialRampToValueAtTime(260,t+1.45);
+ g.gain.setValueAtTime(0.0001,t);g.gain.exponentialRampToValueAtTime(0.55,t+0.12);g.gain.exponentialRampToValueAtTime(0.0001,t+1.5);
+ n.connect(f);f.connect(g);g.connect(master);
+ const o=ac.createOscillator(),og=ac.createGain(),lt=t+1.42;
+ o.type='sine';o.frequency.setValueAtTime(110,lt);o.frequency.exponentialRampToValueAtTime(45,lt+0.22);
+ og.gain.setValueAtTime(0.0001,lt);og.gain.exponentialRampToValueAtTime(0.5,lt+0.015);og.gain.exponentialRampToValueAtTime(0.0001,lt+0.26);
+ o.connect(og);og.connect(master);o.start(lt);o.stop(lt+0.3);
+}
+function bell(t,f,v,len=0.9){
+ [[1,1,1],[2.76,0.16,0.45],[5.4,0.05,0.2]].forEach(([m,a,d])=>{
+  const o=ac.createOscillator(),g=ac.createGain();o.type='sine';o.frequency.value=f*m;
+  g.gain.setValueAtTime(0.0001,t);g.gain.linearRampToValueAtTime(v*a,t+0.004);g.gain.exponentialRampToValueAtTime(0.0001,t+len*d+0.15);
+  o.connect(g);g.connect(master);g.connect(fx);o.start(t);o.stop(t+len+0.4);
+ });
+}
+function sndSpin(dur){
+ const t=ac.currentTime+0.02;
+ const sw=ac.createBiquadFilter();sw.type='lowpass';sw.Q.value=0.5;sw.frequency.setValueAtTime(900,t);sw.frequency.exponentialRampToValueAtTime(3200,t+dur*0.8);
+ const env=ac.createGain();
+ env.gain.setValueAtTime(0.0001,t);env.gain.linearRampToValueAtTime(0.15,t+0.45);env.gain.setValueAtTime(0.15,t+dur*0.7);env.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+ sw.connect(env);
+ const hasPan=!!ac.createStereoPanner;
+ let out=env;
+ if(hasPan){
+  const pan=ac.createStereoPanner(),lfo=ac.createOscillator(),lg=ac.createGain(),N=64,c=new Float32Array(N);
+  for(let i=0;i<N;i++){const x=i/(N-1);c[i]=0.5+1.9*Math.pow(1-x,1.5);}
+  lfo.frequency.setValueCurveAtTime(c,t,dur);lg.gain.value=0.85;lfo.connect(lg);lg.connect(pan.pan);lfo.start(t);lfo.stop(t+dur+0.1);
+  env.connect(pan);out=pan;
+ }
+ out.connect(master);out.connect(fx);
+ [329.63,440,523.25,659.25].forEach(f=>{[-4,4].forEach(cents=>{
+  const o=ac.createOscillator(),g=ac.createGain();o.type='sine';o.detune.value=cents;g.gain.value=0.12;
+  o.frequency.setValueAtTime(f,t);o.frequency.exponentialRampToValueAtTime(f*1.2,t+dur);
+  o.connect(g);g.connect(sw);o.start(t);o.stop(t+dur+0.1);
+ });});
+ const fs=[1046.5,1318.5,1568,1760,2093,2637];
+ for(let i=0;i<16;i++){
+  const st=t+0.15+Math.random()*Math.max(0.2,dur-0.5),o=ac.createOscillator(),g=ac.createGain();
+  o.type='sine';o.frequency.value=fs[Math.floor(Math.random()*fs.length)];
+  g.gain.setValueAtTime(0.0001,st);g.gain.linearRampToValueAtTime(0.028,st+0.015);g.gain.exponentialRampToValueAtTime(0.0001,st+0.55);
+  o.connect(g);
+  if(hasPan){const sp=ac.createStereoPanner();sp.pan.value=Math.random()*2-1;g.connect(sp);sp.connect(master);sp.connect(fx);}
+  else{g.connect(master);g.connect(fx);}
+  o.start(st);o.stop(st+0.6);
+ }
+}
+function sndMagic(){
+ if(!sndLive())return;const t=ac.currentTime+0.1;
+ bell(t,2093,0.11,0.7);
+ bell(t+0.17,1568,0.14,1.6);
+ [1046.5,1318.5,1568].forEach(fr=>{const o=ac.createOscillator(),g=ac.createGain();o.type='sine';o.frequency.value=fr;
+  g.gain.setValueAtTime(0.0001,t+0.1);g.gain.linearRampToValueAtTime(0.022,t+0.35);g.gain.exponentialRampToValueAtTime(0.0001,t+2.2);
+  o.connect(g);g.connect(fx);o.start(t+0.1);o.stop(t+2.3);});
+}
+const sb=document.createElement('button');
+sb.setAttribute('aria-label','音效開關');
+sb.style.cssText='position:fixed;top:calc(env(safe-area-inset-top,0px) + 12px);right:12px;width:44px;height:44px;border-radius:50%;border:1px solid rgba(255,255,255,.4);background:rgba(0,0,0,.35);color:#fff;font-size:20px;line-height:1;padding:0;cursor:pointer;-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);touch-action:manipulation';
+const paintSb=()=>{sb.textContent=soundOn?'🔊':'🔇';};paintSb();
+sb.addEventListener('pointerdown',e=>{e.stopPropagation();});
+sb.addEventListener('click',()=>{soundOn=!soundOn;try{localStorage.setItem('snd',soundOn?'1':'0');}catch(e){}paintSb();unlock();});
+document.body.appendChild(sb);
+let whooshed=false,magicDone=false,spinDone=false;
 let phase=0,ts=0;
 const hint=document.getElementById('hint');
 function frame(now){
  requestAnimationFrame(frame);updateBG(now/1000);
  const dt=Math.min(Math.max((now-lastNow)/1000,0),0.05);lastNow=now;
- const t=t0===null?0:(now-t0)/1000;
+ const t=t0===null?0:Math.max(0,(now-t0)/1000);
  let y=0,ry=Math.PI;
  if(phase===0){
+  if(!whooshed&&t0!==null){whooshed=true;sndFall();}
   if(t>=1.5){phase=1;if(hint)hint.style.opacity=1;if(holy)holy.burst(0);}
   else y=Y0*(1-ease(t/1.5));
  }
  if(phase===2){
   const sp=(now-ts)/1000;
-  if(sp>=2.5){phase=3;rotY=8*Math.PI;vel=0;}
+  if(!spinDone&&sp<0.6&&sndLive()){spinDone=true;sndSpin(2.5-sp);}
+  if(!magicDone&&sp>=2.25){magicDone=true;sndMagic();}
+  if(sp>=2.5){phase=3;rotY=8*Math.PI;vel=0;setTimeout(()=>{if(phase===3&&!busy)redo.classList.add("on");},700);}
   else ry=Math.PI+7*Math.PI*ease(sp/2.5);
  }
  if(phase===3){
@@ -213,10 +308,27 @@ function frame(now){
  if(holy)holy.update(y,ry,dt,phase===0);
  renderer.render(scene,camera);
 }
+holy.set(curIdx===0);
 Promise.all([face(FRONT,false),face(BACK,true),bgP]).then(()=>{
  requestAnimationFrame(n=>{t0=n;});
  requestAnimationFrame(frame);
 });
+const redo=document.getElementById('redo');
+let busy=false;
+function restart(){
+ if(busy||phase!==3)return;busy=true;
+ redo.classList.remove('on');drag=false;vel=0;
+ const next=drawNext(curIdx);
+ new THREE.TextureLoader().load(FRONTS[next],t=>{
+  t.encoding=THREE.sRGBEncoding;t.anisotropy=renderer.capabilities.getMaxAnisotropy();
+  t.minFilter=THREE.LinearMipmapLinearFilter;t.magFilter=THREE.LinearFilter;
+  const old=frontMat.map;frontMat.map=t;frontMat.needsUpdate=true;if(old)old.dispose();
+  curIdx=next;holy.set(curIdx===0);
+  phase=0;t0=performance.now();busy=false;whooshed=false;
+ },undefined,()=>{busy=false;redo.classList.add('on');});
+}
+redo.addEventListener('pointerdown',e=>{e.stopPropagation();});
+redo.addEventListener('click',restart);
 const cv=renderer.domElement;
 const radPerPx=()=>Math.PI/(cv.clientWidth*0.8);
 const ray=new THREE.Raycaster(),ndc=new THREE.Vector2();
@@ -225,7 +337,7 @@ addEventListener('pointerdown',e=>{
   const r=cv.getBoundingClientRect();
   ndc.set(((e.clientX-r.left)/r.width)*2-1,-(((e.clientY-r.top)/r.height)*2-1));
   ray.setFromCamera(ndc,camera);
-  if(ray.intersectObject(card,true).length){phase=2;ts=performance.now();if(hint)hint.style.opacity=0;}
+  if(ray.intersectObject(card,true).length){phase=2;ts=performance.now();magicDone=false;spinDone=false;if(hint)hint.style.opacity=0;}
   return;
  }
  if(phase!==3)return;
