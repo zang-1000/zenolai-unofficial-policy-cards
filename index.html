@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="zh-Hant"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-fullscreen">
+<meta name="robots" content="noindex">
+<title>3D 收藏卡牌動畫</title>
+<style>
+html,body{margin:0;height:100%;background:#000;overflow:hidden;overscroll-behavior:none;touch-action:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none}
+body{position:fixed;inset:0;width:100%}
+body{display:flex;align-items:center;justify-content:center}
+canvas{display:block;background:#000;touch-action:none;-webkit-user-select:none;user-select:none;width:min(100vw,calc(100vh*9/16));height:min(100vh,calc(100vw*16/9))}
+@supports (height:100dvh){canvas{width:min(100vw,calc(100dvh*9/16));height:min(100dvh,calc(100vw*16/9))}}
+#hint{position:fixed;left:0;right:0;bottom:7%;text-align:center;color:rgba(255,255,255,.92);font:500 17px/1.4 system-ui,-apple-system,"PingFang TC","Noto Sans TC",sans-serif;letter-spacing:.25em;text-shadow:0 0 10px rgba(0,0,0,.75);opacity:0;transition:opacity .6s;pointer-events:none}
+#hint span{display:inline-block;animation:pulse 1.8s ease-in-out infinite}
+@keyframes pulse{0%,100%{transform:scale(1);opacity:.6}50%{transform:scale(1.06);opacity:1}}
+</style></head><body>
+<div id="hint"><span>點一下卡牌</span></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>window.THREE||document.write('<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"><\/script>')</script>
+<script>
+const FRONTS=["assets/f00.webp","assets/f01.webp","assets/f02.webp","assets/f03.webp","assets/f04.webp","assets/f05.webp","assets/f06.webp","assets/f07.webp","assets/f08.webp","assets/f09.webp","assets/f10.webp"];
+const FRONT=(function(){
+ const n=FRONTS.length;let i=-1;
+ const h=location.hash.match(/^#(\d+)$/);
+ if(h&&+h[1]<n)i=+h[1];
+ else{
+  let last=-1;try{last=parseInt(localStorage.getItem('lastCard'),10);}catch(e){}
+  // 機率(%)：0=SSR 5；6、7、10=SR 各約8.33（合計25）；其餘7張普通卡各10（合計70）
+  const W=[5,10,10,10,10,10,25/3,25/3,10,10,25/3];
+  const pickW=()=>{const u=new Uint32Array(1);crypto.getRandomValues(u);let x=u[0]/4294967296*100;for(let k=0;k<n;k++){x-=W[k];if(x<0)return k;}return n-1;};
+  i=pickW();
+  if(n>1)while(i===last)i=pickW();
+ }
+ try{localStorage.setItem('lastCard',String(i));}catch(e){}
+ return FRONTS[i];
+})();
+const BACK="assets/back.webp";
+const CLOUD="assets/cloud.jpg";
+const STARS="assets/stars.jpg";
+const W=1080,H=1920;
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(1);renderer.setSize(W,H,false);
+renderer.setClearColor(0x000000,1);renderer.outputEncoding=THREE.sRGBEncoding;
+document.body.appendChild(renderer.domElement);
+addEventListener("contextmenu",e=>e.preventDefault());
+document.addEventListener("gesturestart",e=>e.preventDefault());
+document.addEventListener("touchmove",e=>e.preventDefault(),{passive:false});
+const scene=new THREE.Scene();
+const camera=new THREE.PerspectiveCamera(20,W/H,0.1,50);camera.position.set(0,0,6.4);
+scene.add(new THREE.AmbientLight(0xffffff,0.85));
+const dl=new THREE.DirectionalLight(0xffffff,0.6);dl.position.set(2,3,4);scene.add(dl);
+
+const CH=1.4,CW=CH*2070/2820,T=0.012,R=0.05;
+function rr(w,h,r){const s=new THREE.Shape(),x=-w/2,y=-h/2,P=Math.PI;
+ s.moveTo(x+r,y);s.lineTo(x+w-r,y);s.absarc(x+w-r,y+r,r,-P/2,0,false);
+ s.lineTo(x+w,y+h-r);s.absarc(x+w-r,y+h-r,r,0,P/2,false);
+ s.lineTo(x+r,y+h);s.absarc(x+r,y+h-r,r,P/2,P,false);
+ s.lineTo(x,y+r);s.absarc(x+r,y+r,r,P,P*1.5,false);return s;}
+const shape=rr(CW,CH,R);
+const card=new THREE.Group();scene.add(card);
+const eg=new THREE.ExtrudeGeometry(shape,{depth:T,bevelEnabled:false,curveSegments:24});
+eg.translate(0,0,-T/2);
+card.add(new THREE.Mesh(eg,new THREE.MeshStandardMaterial({color:0xdcdcdc,roughness:0.5,metalness:0.1})));
+function face(src,back){
+ const g=new THREE.ShapeGeometry(shape,24),p=g.attributes.position,uv=g.attributes.uv;
+ for(let i=0;i<p.count;i++)uv.setXY(i,p.getX(i)/CW+0.5,p.getY(i)/CH+0.5);
+ const m=new THREE.MeshBasicMaterial();
+ const mesh=new THREE.Mesh(g,m);
+ mesh.position.z=(back?-1:1)*(T/2+0.0004);
+ if(back)mesh.rotation.y=Math.PI;
+ card.add(mesh);
+ return new Promise(res=>new THREE.TextureLoader().load(src,t=>{
+  t.encoding=THREE.sRGBEncoding;t.anisotropy=renderer.capabilities.getMaxAnisotropy();
+  t.minFilter=THREE.LinearMipmapLinearFilter;t.magFilter=THREE.LinearFilter;
+  m.map=t;m.needsUpdate=true;res();}));
+}
+const layerVS="varying vec2 vUv;void main(){vUv=uv;gl_Position=vec4(position.xy,0.999,1.0);}";
+const layerFS=`uniform sampler2D map;uniform float uTime;uniform vec2 uAmp;uniform vec2 uPer;uniform float uWarp;uniform float uSeed;varying vec2 vUv;
+void main(){
+ vec2 off=vec2(uAmp.x*sin(uTime*uPer.x+uSeed),uAmp.y*sin(uTime*uPer.y+uSeed*1.7));
+ vec2 w=uWarp*vec2(sin(vUv.y*5.0+uTime*0.45)+0.6*sin(vUv.x*9.0-uTime*0.35),cos(vUv.x*4.0+uTime*0.4)+0.6*cos(vUv.y*8.0+uTime*0.3));
+ gl_FragColor=texture2D(map,0.5+(vUv-0.5)*0.84+off+w);}`;
+const layerMats=[];
+function layer(src,cfg){return new Promise(res=>new THREE.TextureLoader().load(src,t=>{
+ t.minFilter=THREE.LinearFilter;t.generateMipmaps=false;
+ const m=new THREE.ShaderMaterial({uniforms:{map:{value:t},uTime:{value:0},uAmp:{value:new THREE.Vector2(cfg.ax,cfg.ay)},uPer:{value:new THREE.Vector2(cfg.px,cfg.py)},uWarp:{value:cfg.warp},uSeed:{value:0}},
+  vertexShader:layerVS,fragmentShader:layerFS,depthWrite:false,transparent:cfg.add,blending:cfg.add?THREE.AdditiveBlending:THREE.NormalBlending});
+ const mesh=new THREE.Mesh(new THREE.PlaneGeometry(2,2),m);mesh.frustumCulled=false;mesh.renderOrder=cfg.order;scene.add(mesh);layerMats.push(m);res();}));}
+const bgP=Promise.all([
+ layer(CLOUD,{ax:0.06,ay:0.04,px:0.2,py:0.15,warp:0.01,add:false,order:-3}),
+ layer(STARS,{ax:0.07,ay:0.05,px:0.33,py:0.27,warp:0.0,add:true,order:-2})]);
+// 前景漂移星點（視差、微閃爍）
+(function(){
+ let a=1234567;const rnd=()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};
+ const N=280,pos=new Float32Array(N*3),sz=new Float32Array(N),ph=new Float32Array(N),sp=new Float32Array(N),col=new Float32Array(N*3);
+ for(let i=0;i<N;i++){
+  const z=-0.3-rnd()*1.6,d=6.4-z,hh=d*0.1763*1.08,hw=hh*0.5625;
+  pos[i*3]=(rnd()*2-1)*hw;pos[i*3+1]=(rnd()*2-1)*hh;pos[i*3+2]=z;
+  sz[i]=0.005+Math.pow(rnd(),3)*0.012;ph[i]=rnd();sp[i]=4*(0.004+(1.9+z)*0.012);
+  const k=rnd(),c=k<0.6?[1,1,1]:k<0.85?[0.75,0.88,1]:[0.8,1,0.9];
+  col[i*3]=c[0];col[i*3+1]=c[1];col[i*3+2]=c[2];
+ }
+ const g=new THREE.BufferGeometry();
+ g.setAttribute('position',new THREE.BufferAttribute(pos,3));
+ g.setAttribute('aSize',new THREE.BufferAttribute(sz,1));
+ g.setAttribute('aPhase',new THREE.BufferAttribute(ph,1));
+ g.setAttribute('aSpeed',new THREE.BufferAttribute(sp,1));
+ g.setAttribute('aColor',new THREE.BufferAttribute(col,3));
+ window.starMat=new THREE.ShaderMaterial({
+  uniforms:{uTime:{value:0},uScale:{value:H/(2*Math.tan(10*Math.PI/180))}},
+  transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,
+  vertexShader:`attribute float aSize;attribute float aPhase;attribute float aSpeed;attribute vec3 aColor;
+  uniform float uTime;uniform float uScale;varying float vA;varying vec3 vC;
+  void main(){vec3 p=position;float d=6.4-p.z;float hh=d*0.1763*1.08;float hw=hh*0.5625;
+  p.xy+=vec2(-0.8,-0.35)*aSpeed*uTime;
+  p.x=mod(p.x+hw,2.0*hw)-hw;p.y=mod(p.y+hh,2.0*hh)-hh;
+  vec4 mv=modelViewMatrix*vec4(p,1.0);gl_PointSize=aSize*uScale/-mv.z;gl_Position=projectionMatrix*mv;
+  vA=0.65+0.35*sin(uTime*(0.5+aPhase*0.6)+aPhase*6.2831);vC=aColor;}`,
+  fragmentShader:`varying float vA;varying vec3 vC;
+  void main(){float d=length(gl_PointCoord-0.5);float a=smoothstep(0.5,0.0,d);a*=a;gl_FragColor=vec4(vC,a*vA);}`
+ });
+ const pts=new THREE.Points(g,starMat);pts.frustumCulled=false;pts.renderOrder=-1;scene.add(pts);
+})();
+function updateBG(T){
+ starMat.uniforms.uTime.value=T;
+ layerMats.forEach(m=>m.uniforms.uTime.value=T);
+}
+const Y0=1.95,ease=x=>1-Math.pow(1-x,3);
+// SSR 專屬：環繞卡牌的金色光粒子（純粒子，無線條）
+const holy=(function(){
+ if(FRONT!==FRONTS[0])return null;
+ const N=2000,pos=new Float32Array(N*3),siz=new Float32Array(N),alp=new Float32Array(N),vel=new Float32Array(N*3),age=new Float32Array(N).fill(99),life=new Float32Array(N),ph=new Float32Array(N);
+ const g=new THREE.BufferGeometry();
+ g.setAttribute('position',new THREE.BufferAttribute(pos,3));
+ g.setAttribute('aSize',new THREE.BufferAttribute(siz,1));
+ g.setAttribute('aAlpha',new THREE.BufferAttribute(alp,1));
+ const pm=new THREE.ShaderMaterial({uniforms:{uScale:{value:H/(2*Math.tan(10*Math.PI/180))}},transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,
+  vertexShader:`attribute float aSize;attribute float aAlpha;varying float vA;
+  void main(){vA=aAlpha;vec4 mv=modelViewMatrix*vec4(position,1.0);gl_PointSize=aSize*uScale/-mv.z;gl_Position=projectionMatrix*mv;}`,
+  fragmentShader:`varying float vA;
+  void main(){float d=length(gl_PointCoord-0.5);float core=smoothstep(0.5,0.0,d);core*=core;
+  float soft=pow(smoothstep(0.5,0.0,d),1.4);
+  vec3 col=mix(vec3(1.0,0.74,0.26),vec3(1.0,0.97,0.8),core*0.8);
+  gl_FragColor=vec4(col,(soft*0.8+core*0.7)*vA);}`});
+ const pts=new THREE.Points(g,pm);pts.frustumCulled=false;pts.renderOrder=3;scene.add(pts);
+ let acc=0,idx=0;
+ function spawn(cy,wf,burst){
+  const i=idx;idx=(idx+1)%N;
+  const hw=CW/2,hh=CH/2,a=Math.random()*6.2832,c=Math.cos(a),s=Math.sin(a);
+  const r=1/Math.max(Math.abs(c)/hw,Math.abs(s)/hh);
+  const glow=Math.random()<0.22;const out=(burst?0.0:Math.random()*0.5)+(glow?0.05:0.02);
+  const dx=c/Math.hypot(c/hw,s/hh)*0+c,dy=s;
+  const L=Math.hypot(dx,dy)||1;
+  pos[i*3]=(c*r+dx/L*out)*wf;pos[i*3+1]=cy+s*r+dy/L*out;pos[i*3+2]=glow?-0.08-Math.random()*0.35:(Math.random()-0.35)*0.4;
+  const sp=burst?0.22+Math.random()*0.22:0.015+Math.random()*0.07;
+  vel[i*3]=dx/L*sp*wf+(Math.random()-0.5)*0.03;vel[i*3+1]=dy/L*sp+0.02+Math.random()*0.08;vel[i*3+2]=0;
+  age[i]=0;life[i]=glow?2.2+Math.random()*1.8:1.6+Math.random()*1.8;siz[i]=glow?0.16+Math.random()*0.14:0.035+Math.pow(Math.random(),2)*0.09;ph[i]=Math.random()*6.28;
+ }
+ return{
+  burst(cy){for(let k=0;k<300;k++)spawn(cy,1,true);},
+  update(cy,ry,dt,falling){
+   const wf=Math.max(0.12,Math.abs(Math.cos(ry)));
+   acc+=dt*(falling?650:240);
+   while(acc>=1){spawn(cy,wf,false);acc--;}
+   for(let i=0;i<N;i++){
+    if(age[i]<life[i]){age[i]+=dt;pos[i*3]+=vel[i*3]*dt;pos[i*3+1]+=vel[i*3+1]*dt;
+     alp[i]=Math.sin(Math.PI*Math.min(age[i]/life[i],1))*(0.75+0.25*Math.sin(age[i]*7+ph[i]));}
+    else alp[i]=0;
+   }
+   g.attributes.position.needsUpdate=true;g.attributes.aAlpha.needsUpdate=true;g.attributes.aSize.needsUpdate=true;
+  }};
+})();
+const glintMat=new THREE.ShaderMaterial({uniforms:{uK:{value:-1}},transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,
+ vertexShader:"varying vec2 vP;void main(){vP=position.xy;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}",
+ fragmentShader:`uniform float uK;varying vec2 vP;
+ void main(){
+  vec2 dir=normalize(vec2(${CW},${CH}));
+  float L=length(vec2(${CW},${CH}));
+  float x=dot(vP,dir)-mix(-L*0.5-0.35,L*0.5+0.35,uK);
+  float band=exp(-pow(x/0.09,2.0))*0.6+exp(-pow((x+0.17)/0.025,2.0))*0.35;
+  gl_FragColor=vec4(1.0,0.97,0.9,band);}`});
+const glint=new THREE.Mesh(new THREE.ShapeGeometry(shape,24),glintMat);
+glint.position.z=T/2+0.0009;glint.renderOrder=5;card.add(glint);
+
+let t0=null;
+let live=false,drag=false,rotY=0,vel=0,lastX=0,lastT=0,lastNow=0;
+let phase=0,ts=0;
+const hint=document.getElementById('hint');
+function frame(now){
+ requestAnimationFrame(frame);updateBG(now/1000);
+ const dt=Math.min(Math.max((now-lastNow)/1000,0),0.05);lastNow=now;
+ const t=t0===null?0:(now-t0)/1000;
+ let y=0,ry=Math.PI;
+ if(phase===0){
+  if(t>=1.5){phase=1;if(hint)hint.style.opacity=1;if(holy)holy.burst(0);}
+  else y=Y0*(1-ease(t/1.5));
+ }
+ if(phase===2){
+  const sp=(now-ts)/1000;
+  if(sp>=2.5){phase=3;rotY=8*Math.PI;vel=0;}
+  else ry=Math.PI+7*Math.PI*ease(sp/2.5);
+ }
+ if(phase===3){
+  if(!drag){rotY+=vel*dt;vel*=Math.exp(-3*dt);if(Math.abs(vel)<0.001)vel=0;}
+  ry=rotY;
+ }
+ card.position.y=y;card.rotation.y=ry;
+ let gk=-1;if(phase>=2)gk=((now-ts)/1000-2.3)/0.9;
+ glintMat.uniforms.uK.value=(gk<0||gk>1)?-1:gk*gk*(3-2*gk);
+ if(holy)holy.update(y,ry,dt,phase===0);
+ renderer.render(scene,camera);
+}
+Promise.all([face(FRONT,false),face(BACK,true),bgP]).then(()=>{
+ requestAnimationFrame(n=>{t0=n;});
+ requestAnimationFrame(frame);
+});
+const cv=renderer.domElement;
+const radPerPx=()=>Math.PI/(cv.clientWidth*0.8);
+const ray=new THREE.Raycaster(),ndc=new THREE.Vector2();
+addEventListener('pointerdown',e=>{
+ if(phase===1){
+  const r=cv.getBoundingClientRect();
+  ndc.set(((e.clientX-r.left)/r.width)*2-1,-(((e.clientY-r.top)/r.height)*2-1));
+  ray.setFromCamera(ndc,camera);
+  if(ray.intersectObject(card,true).length){phase=2;ts=performance.now();if(hint)hint.style.opacity=0;}
+  return;
+ }
+ if(phase!==3)return;
+ drag=true;lastX=e.clientX;lastT=e.timeStamp;vel=0;
+});
+addEventListener('pointermove',e=>{if(!drag)return;
+ const dx=e.clientX-lastX,dtm=Math.max((e.timeStamp-lastT)/1000,0.008);
+ lastX=e.clientX;lastT=e.timeStamp;
+ const d=dx*radPerPx();rotY+=d;
+ vel=0.6*vel+0.4*(d/dtm);});
+const endDrag=e=>{if(!drag)return;drag=false;if((e.timeStamp-lastT)>80)vel=0;vel=Math.max(-25,Math.min(25,vel));};
+addEventListener('pointerup',endDrag);addEventListener('pointercancel',endDrag);
+</script></body></html>
